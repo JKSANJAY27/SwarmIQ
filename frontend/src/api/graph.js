@@ -1,14 +1,14 @@
 import service, { requestWithRetry } from './index'
 
 /**
- * 生成本体（上传文档和模拟需求）
- * @param {Object} data - 包含files, simulation_requirement, project_name等
+ * Fast Build Graph (SwarmIQ Backend)
+ * @param {FormData} formData - 包含files, goal 等
  * @returns {Promise}
  */
-export function generateOntology(formData) {
+export function buildGraphFast(formData) {
   return requestWithRetry(() => 
     service({
-      url: '/api/graph/ontology/generate',
+      url: '/api/graph/build',
       method: 'post',
       data: formData,
       headers: {

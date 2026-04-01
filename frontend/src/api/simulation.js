@@ -5,7 +5,7 @@ import service, { requestWithRetry } from './index'
  * @param {Object} data - { project_id, graph_id?, enable_twitter?, enable_reddit? }
  */
 export const createSimulation = (data) => {
-  return requestWithRetry(() => service.post('/api/simulation/create', data), 3, 1000)
+  return requestWithRetry(() => service.post('/api/simulations/create', data), 3, 1000)
 }
 
 /**
@@ -13,7 +13,7 @@ export const createSimulation = (data) => {
  * @param {Object} data - { simulation_id, entity_types?, use_llm_for_profiles?, parallel_profile_count?, force_regenerate? }
  */
 export const prepareSimulation = (data) => {
-  return requestWithRetry(() => service.post('/api/simulation/prepare', data), 3, 1000)
+  return requestWithRetry(() => service.post('/api/simulations/prepare', data), 3, 1000)
 }
 
 /**
@@ -21,7 +21,7 @@ export const prepareSimulation = (data) => {
  * @param {Object} data - { task_id?, simulation_id? }
  */
 export const getPrepareStatus = (data) => {
-  return service.post('/api/simulation/prepare/status', data)
+  return service.post('/api/simulations/prepare/status', data)
 }
 
 /**
@@ -73,7 +73,7 @@ export const getSimulationConfigRealtime = (simulationId) => {
  */
 export const listSimulations = (projectId) => {
   const params = projectId ? { project_id: projectId } : {}
-  return service.get('/api/simulation/list', { params })
+  return service.get('/api/simulations/list', { params })
 }
 
 /**
@@ -81,7 +81,7 @@ export const listSimulations = (projectId) => {
  * @param {Object} data - { simulation_id, platform?, max_rounds?, enable_graph_memory_update? }
  */
 export const startSimulation = (data) => {
-  return requestWithRetry(() => service.post('/api/simulation/start', data), 3, 1000)
+  return requestWithRetry(() => service.post('/api/simulations/start', data), 3, 1000)
 }
 
 /**
@@ -89,7 +89,7 @@ export const startSimulation = (data) => {
  * @param {Object} data - { simulation_id }
  */
 export const stopSimulation = (data) => {
-  return service.post('/api/simulation/stop', data)
+  return service.post('/api/simulations/stop', data)
 }
 
 /**
@@ -157,7 +157,7 @@ export const getSimulationActions = (simulationId, params = {}) => {
  * @param {Object} data - { simulation_id, timeout? }
  */
 export const closeSimulationEnv = (data) => {
-  return service.post('/api/simulation/close-env', data)
+  return service.post('/api/simulations/close-env', data)
 }
 
 /**
@@ -165,7 +165,7 @@ export const closeSimulationEnv = (data) => {
  * @param {Object} data - { simulation_id }
  */
 export const getEnvStatus = (data) => {
-  return service.post('/api/simulation/env-status', data)
+  return service.post('/api/simulations/env-status', data)
 }
 
 /**
@@ -173,7 +173,7 @@ export const getEnvStatus = (data) => {
  * @param {Object} data - { simulation_id, interviews: [{ agent_id, prompt }] }
  */
 export const interviewAgents = (data) => {
-  return requestWithRetry(() => service.post('/api/simulation/interview/batch', data), 3, 1000)
+  return requestWithRetry(() => service.post('/api/simulations/interview/batch', data), 3, 1000)
 }
 
 /**
@@ -182,6 +182,6 @@ export const interviewAgents = (data) => {
  * @param {number} limit - 返回数量限制
  */
 export const getSimulationHistory = (limit = 20) => {
-  return service.get('/api/simulation/history', { params: { limit } })
+  return service.get('/api/simulations/history', { params: { limit } })
 }
 

@@ -1,9 +1,7 @@
 services:
-  mirofish:
-    image: ghcr.io/666ghj/mirofish:latest
-    # 加速镜像（如拉取缓慢可替换上方地址）
-    # image: ghcr.nju.edu.cn/666ghj/mirofish:latest
-    container_name: mirofish
+  swarmiq:
+    build: .
+    container_name: swarmiq
     env_file:
       - .env
     ports:
@@ -11,4 +9,5 @@ services:
       - "5001:5001"
     restart: unless-stopped
     volumes:
+      - ./backend/data:/app/backend/data
       - ./backend/uploads:/app/backend/uploads
