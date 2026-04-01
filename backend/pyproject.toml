@@ -1,0 +1,68 @@
+[project]
+name = "swarmiq-backend"
+version = "0.1.0"
+description = "SwarmIQ — Local-first multi-agent swarm simulation and prediction engine"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0" }
+authors = [
+    { name = "SwarmIQ Contributors" }
+]
+
+dependencies = [
+    # Web framework (async-first)
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "python-multipart>=0.0.9",
+    "websockets>=12.0",
+
+    # LLM — local
+    "ollama>=0.3.0",
+
+    # LLM — cloud (optional Gemini)
+    "google-generativeai>=0.8.0",
+
+    # Vector memory
+    "chromadb>=0.5.0",
+
+    # Graph analytics
+    "networkx>=3.3",
+
+    # ML for analytics
+    "numpy>=1.26.0",
+    "scikit-learn>=1.4.0",
+
+    # Document processing
+    "PyMuPDF>=1.24.0",
+    "beautifulsoup4>=4.12.0",
+    "python-docx>=1.1.0",
+
+    # Database (async SQLite)
+    "aiosqlite>=0.20.0",
+
+    # Utilities
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "charset-normalizer>=3.0.0",
+    "chardet>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
