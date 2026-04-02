@@ -45,7 +45,7 @@ class GeminiClient:
             return await asyncio.to_thread(_call)
         except Exception as exc:
             logger.error("Gemini generation failed: %s", exc)
-            return ""
+            raise exc
 
     async def analyze_seed(self, document_text: str, prediction_goal: str) -> dict:
         """Deep analysis of seed document. Returns structured world context."""

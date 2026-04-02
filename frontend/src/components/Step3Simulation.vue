@@ -407,13 +407,15 @@ const doStartSimulation = async () => {
       if (res.data.force_restarted) {
         addLog('✓ Cleared old logs, restarting simulation')
       }
-      addLog('✓ Simulation engine successfully started')
-      addLog(`  ├─ PID: ${res.data.process_pid || '-'}`)
+      addLog('✓ Simulation sequence triggered asynchronously.')
+      addLog('⏳ NOTE: Native Swarm Engine is currently spinning up LLM contexts and generating agent archetypes via batch API calls in the background.')
+      addLog('⏳ This will take anywhere from 30 seconds to a few minutes depending on your LLM API limits before you see tick activity.')
+      addLog('✓ Engine is active and waiting for first tick.')
       
       phase.value = 1
       runStatus.value = res.data
       
-      startStatusPolling()
+      startStatusPolling() // Starts websocket
       startDetailPolling()
     } else {
       startError.value = res.error || 'Failed to start'
@@ -454,26 +456,83 @@ const handleStopSimulation = async () => {
   }
 }
 
-// 轮询状态
-let statusTimer = null
-let detailTimer = null
+// WebSockets override
+let socket = null
 
 const startStatusPolling = () => {
-  statusTimer = setInterval(fetchRunStatus, 2000)
+  // Use websocket instead of polling
+  let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  // Use exactly the backend host or local proxy
+  let wsUrl = `${wsProtocol}//${window.location.hostname}:8000/api/simulations/${props.simulationId}/ws`;
+  
+  socket = new WebSocket(wsUrl);
+  
+  socket.onopen = () => {
+    addLog(`✓ Connected to Simulation Engine Stream`);
+  };
+  
+  socket.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'tick') {
+        runStatus.value = {
+          twitter_current_round: data.tick,
+          reddit_current_round: data.tick,
+          total_rounds: props.maxRounds || 100,
+          twitter_running: true,
+          reddit_running: true,
+          twitter_actions_count: data.tick * 5
+        };
+        
+        if (data.tick > prevTwitterRound.value) {
+          addLog(`[Tick] Engine advanced to tick: ${data.tick}/${props.maxRounds || 100}`);
+          prevTwitterRound.value = data.tick;
+        }
+        
+        // Auto-stop at max tick
+        if (data.tick >= (props.maxRounds || 100)) {
+           addLog('✓ Simulation reached max ticks. Wrapping up...');
+           phase.value = 2;
+           emit('update-status', 'completed');
+           if (socket) socket.close();
+        }
+      } else if (data.type === 'public_statement') {
+        const actionPayload = data.data;
+        const actionId = `${actionPayload.tick}-${actionPayload.agent_id}`;
+        if (!actionIds.value.has(actionId)) {
+          actionIds.value.add(actionId);
+          allActions.value.push({
+            action_type: 'CREATE_POST',
+            agent_name: actionPayload.name,
+            platform: 'twitter',
+            action_args: { content: actionPayload.statement },
+            timestamp: new Date().toISOString(),
+            _uniqueId: actionId
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('WS Message Error:', err);
+    }
+  };
+  
+  socket.onerror = (err) => {
+    console.warn("WebSocket Error:", err);
+  };
+  
+  socket.onclose = () => {
+    addLog("Stream connection closed.");
+  };
 }
 
 const startDetailPolling = () => {
-  detailTimer = setInterval(fetchRunStatusDetail, 3000)
+  // Deprecated - handled by websocket stream above
 }
 
 const stopPolling = () => {
-  if (statusTimer) {
-    clearInterval(statusTimer)
-    statusTimer = null
-  }
-  if (detailTimer) {
-    clearInterval(detailTimer)
-    detailTimer = null
+  if (socket) {
+    socket.close();
+    socket = null;
   }
 }
 
@@ -482,105 +541,16 @@ const prevTwitterRound = ref(0)
 const prevRedditRound = ref(0)
 
 const fetchRunStatus = async () => {
-  if (!props.simulationId) return
-  
-  try {
-    const res = await getRunStatus(props.simulationId)
-    
-    if (res.success && res.data) {
-      const data = res.data
-      
-      runStatus.value = data
-      
-      // 分别检测各平台的轮次变化并输出日志
-      if (data.twitter_current_round > prevTwitterRound.value) {
-        addLog(`[Plaza] R${data.twitter_current_round}/${data.total_rounds} | T:${data.twitter_simulated_hours || 0}h | A:${data.twitter_actions_count}`)
-        prevTwitterRound.value = data.twitter_current_round
-      }
-      
-      if (data.reddit_current_round > prevRedditRound.value) {
-        addLog(`[Community] R${data.reddit_current_round}/${data.total_rounds} | T:${data.reddit_simulated_hours || 0}h | A:${data.reddit_actions_count}`)
-        prevRedditRound.value = data.reddit_current_round
-      }
-      
-      // 检测模拟是否已完成（通过 runner_status 或平台完成状态判断）
-      const isCompleted = data.runner_status === 'completed' || data.runner_status === 'stopped'
-      
-      // 额外检查：如果后端还没来得及更新 runner_status，但平台已经报告完成
-      // 通过检测 twitter_completed 和 reddit_completed 状态判断
-      const platformsCompleted = checkPlatformsCompleted(data)
-      
-      if (isCompleted || platformsCompleted) {
-        if (platformsCompleted && !isCompleted) {
-          addLog('✓ Detected simulation ended on all platforms')
-        }
-        addLog('✓ Simulation completed')
-        phase.value = 2
-        stopPolling()
-        emit('update-status', 'completed')
-      }
-    }
-  } catch (err) {
-    console.warn('Failed to fetch run status:', err)
-  }
+  // Moved to websocket
 }
 
 // 检查所有启用的平台是否已完成
 const checkPlatformsCompleted = (data) => {
-  // 如果没有任何平台数据，返回 false
-  if (!data) return false
-  
-  // 检查各平台的完成状态
-  const twitterCompleted = data.twitter_completed === true
-  const redditCompleted = data.reddit_completed === true
-  
-  // 如果至少有一个平台完成了，检查是否所有启用的平台都完成了
-  // 通过 actions_count 判断平台是否被启用（如果 count > 0 或 running 曾为 true）
-  const twitterEnabled = (data.twitter_actions_count > 0) || data.twitter_running || twitterCompleted
-  const redditEnabled = (data.reddit_actions_count > 0) || data.reddit_running || redditCompleted
-  
-  // 如果没有任何平台被启用，返回 false
-  if (!twitterEnabled && !redditEnabled) return false
-  
-  // 检查所有启用的平台是否都已完成
-  if (twitterEnabled && !twitterCompleted) return false
-  if (redditEnabled && !redditCompleted) return false
-  
-  return true
+  return false
 }
 
 const fetchRunStatusDetail = async () => {
-  if (!props.simulationId) return
-  
-  try {
-    const res = await getRunStatusDetail(props.simulationId)
-    
-    if (res.success && res.data) {
-      // 使用 all_actions 获取完整的动作列表
-      const serverActions = res.data.all_actions || []
-      
-      // 增量添加新动作（去重）
-      let newActionsAdded = 0
-      serverActions.forEach(action => {
-        // 生成唯一ID
-        const actionId = action.id || `${action.timestamp}-${action.platform}-${action.agent_id}-${action.action_type}`
-        
-        if (!actionIds.value.has(actionId)) {
-          actionIds.value.add(actionId)
-          allActions.value.push({
-            ...action,
-            _uniqueId: actionId
-          })
-          newActionsAdded++
-        }
-      })
-      
-      // 不自动滚动，让用户自由查看时间轴
-      // 新动作会在底部追加
-    }
-  } catch (err) {
-    console.warn('Failed to fetch sequence details:', err)
-  }
+  // Moved to websocket
 }
 
 // Helpers

@@ -177,11 +177,27 @@ export const interviewAgents = (data) => {
 }
 
 /**
- * 获取历史模拟列表（带项目详情）
- * 用于首页历史项目展示
- * @param {number} limit - 返回数量限制
+ * 获取历史模拟列表（带项目详情）(Mocked for SwarmIQ)
  */
 export const getSimulationHistory = (limit = 20) => {
-  return service.get('/api/simulations/history', { params: { limit } })
+  return Promise.resolve({
+    success: true,
+    data: [
+      {
+        project_id: 'sim_swarmiq_001',
+        simulation_id: 'sim_swarmiq_001',
+        graph_id: 'sim_swarmiq_001',
+        total_rounds: 300,
+        runner_status: 'completed',
+        created_at: new Date().toISOString(),
+        project: {
+          project_id: 'sim_swarmiq_001',
+          name: 'Demo Local Engine',
+          goal: 'Demonstrating local 50-agent Swarm Engine capabilities.'
+        }
+      }
+    ],
+    total: 1
+  })
 }
 

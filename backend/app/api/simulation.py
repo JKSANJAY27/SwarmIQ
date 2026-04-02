@@ -60,10 +60,7 @@ async def start_simulation(
         world_context=world_context
     )
     
-    # Initialize agents via LLM
-    await engine.initialize_agents(count=min(req.num_agents, Config.SIM_MAX_AGENTS))
-    
-    # Register active engine
+    # Register active engine immediately
     sims = get_active_simulations()
     sims[req.sim_id] = engine
 
@@ -72,6 +69,9 @@ async def start_simulation(
     
     async def run_loop():
         try:
+            # Initialize agents via LLM in the background
+            await engine.initialize_agents(count=min(req.num_agents, Config.SIM_MAX_AGENTS))
+            
             for _ in range(req.num_ticks):
                 await engine.tick()
                 

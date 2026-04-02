@@ -34,37 +34,44 @@ export function buildGraph(data) {
 }
 
 /**
- * 查询任务状态
- * @param {String} taskId - 任务ID
- * @returns {Promise}
+ * 查询任务状态 (Mocked for SwarmIQ)
  */
 export function getTaskStatus(taskId) {
-  return service({
-    url: `/api/graph/task/${taskId}`,
-    method: 'get'
-  })
+  return Promise.resolve({ success: true, data: { status: 'completed' } })
 }
 
 /**
- * 获取图谱数据
- * @param {String} graphId - 图谱ID
- * @returns {Promise}
+ * 获取图谱数据 (Mocked for SwarmIQ)
  */
 export function getGraphData(graphId) {
-  return service({
-    url: `/api/graph/data/${graphId}`,
-    method: 'get'
+  return Promise.resolve({
+    success: true,
+    data: {
+      nodes: [
+        { id: '1', label: 'Simulation Environment', group: 1, size: 25 },
+        { id: '2', label: 'Agent Personas', group: 2, size: 20 },
+        { id: '3', label: 'Events', group: 3, size: 15 },
+        { id: '4', label: 'Documents', group: 4, size: 15 }
+      ],
+      edges: [
+        { from: '1', to: '2', label: 'contains' },
+        { from: '1', to: '3', label: 'manages' },
+        { from: '4', to: '1', label: 'context' }
+      ]
+    }
   })
 }
 
 /**
- * 获取项目信息
- * @param {String} projectId - 项目ID
- * @returns {Promise}
+ * 获取项目信息 (Mocked for SwarmIQ)
  */
 export function getProject(projectId) {
-  return service({
-    url: `/api/graph/project/${projectId}`,
-    method: 'get'
+  return Promise.resolve({
+    success: true,
+    data: {
+      project_id: projectId,
+      graph_id: projectId,
+      goal: 'Observe dynamic agent relations within specified scenario boundary'
+    }
   })
 }

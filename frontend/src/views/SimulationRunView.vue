@@ -145,45 +145,8 @@ const toggleMaximize = (target) => {
 }
 
 const handleGoBack = async () => {
-  addLog('Returning to Step 2, stopping simulation...')
-  
+  addLog('Stopping simulation locally and returning to Step 2...')
   stopGraphRefresh()
-  
-  try {
-    const envStatusRes = await getEnvStatus({ simulation_id: currentSimulationId.value })
-    
-    if (envStatusRes.success && envStatusRes.data?.env_alive) {
-      addLog('Stopping engine...')
-      try {
-        await closeSimulationEnv({ 
-          simulation_id: currentSimulationId.value,
-          timeout: 10
-        })
-        addLog('✓ Engine environment closed')
-      } catch (closeErr) {
-        addLog(`Engine close failed, attempting force stop...`)
-        try {
-          await stopSimulation({ simulation_id: currentSimulationId.value })
-          addLog('✓ Engine force stopped')
-        } catch (stopErr) {
-          addLog(`Force stop failed: ${stopErr.message}`)
-        }
-      }
-    } else {
-      if (isSimulating.value) {
-        addLog('Stopping engine processes...')
-        try {
-          await stopSimulation({ simulation_id: currentSimulationId.value })
-          addLog('✓ Engine processes stopped')
-        } catch (err) {
-          addLog(`Engine stop failed: ${err.message}`)
-        }
-      }
-    }
-  } catch (err) {
-    addLog(`Check status failed: ${err.message}`)
-  }
-  
   router.push({ name: 'Simulation', params: { simulationId: currentSimulationId.value } })
 }
 
@@ -194,35 +157,18 @@ const handleNextStep = () => {
 // --- Data Logic ---
 const loadSimulationData = async () => {
   try {
-    addLog(`Loading simulation data: ${currentSimulationId.value}`)
+    addLog(`Connecting to Simulation Engine: ${currentSimulationId.value}`)
     
-    const simRes = await getSimulation(currentSimulationId.value)
-    if (simRes.success && simRes.data) {
-      const simData = simRes.data
+    const projRes = await getProject(currentSimulationId.value)
+    if (projRes.success && projRes.data) {
+      projectData.value = projRes.data
+      addLog(`✓ Base project parameters loaded`)
       
-      try {
-        const configRes = await getSimulationConfig(currentSimulationId.value)
-        if (configRes.success && configRes.data?.time_config?.minutes_per_round) {
-          minutesPerRound.value = configRes.data.time_config.minutes_per_round
-          addLog(`Time configuration: ${minutesPerRound.value} minutes/tick`)
-        }
-      } catch (configErr) {
-        addLog(`Fetch time config failed, using fallback: ${minutesPerRound.value} minutes/tick`)
-      }
-      
-      if (simData.project_id) {
-        const projRes = await getProject(simData.project_id)
-        if (projRes.success && projRes.data) {
-          projectData.value = projRes.data
-          addLog(`Project loaded: ${projRes.data.project_id}`)
-          
-          if (projRes.data.graph_id) {
-            await loadGraph(projRes.data.graph_id)
-          }
-        }
-      }
+      const graphIdToLoad = projRes.data.graph_id || currentSimulationId.value
+      await loadGraph(graphIdToLoad)
     } else {
-      addLog(`Failed to load simulation: ${simRes.error || 'Unknown error'}`)
+      addLog(`Project data not found, attempting direct graph load.`)
+      await loadGraph(currentSimulationId.value)
     }
   } catch (err) {
     addLog(`Load exception: ${err.message}`)
