@@ -144,8 +144,8 @@ const loadReportData = async () => {
     
     // Get report info
     const reportRes = await getReport(currentReportId.value)
-    if (reportRes.success && reportRes.data) {
-      const reportData = reportRes.data
+    if (reportRes.success) {
+      const reportData = reportRes.data || reportRes
       simulationId.value = reportData.sim_id || reportData.simulation_id
       
       if (simulationId.value) {

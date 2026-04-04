@@ -693,11 +693,11 @@ const sendToReportAgent = async (message) => {
     message: message,
     chat_history: historyForApi
   })
-  
-  if (res.success && res.data) {
+  const responseData = res.data || res
+  if (res.success && responseData) {
     chatHistory.value.push({
       role: 'assistant',
-      content: res.data.response || res.data.answer || 'No response',
+      content: responseData.response || responseData.answer || 'No response',
       timestamp: new Date().toISOString()
     })
     addLog('Report Agent replied')
@@ -874,12 +874,21 @@ const loadReportData = async () => {
   
   try {
     addLog(`Loading report data: ${props.reportId}`)
-    
-    // Get report info
     const reportRes = await getReport(props.reportId)
-    if (reportRes.success && reportRes.data) {
-      // Load agent logs to get report outline and sections
-      await loadAgentLogs()
+    const reportData = reportRes.data || reportRes
+    
+    if (reportRes.success && reportData.markdown) {
+      reportOutline.value = {
+        title: 'Simulation Analytics Report',
+        summary: 'Final Synthesis of Simulation Run',
+        sections: [
+          { title: 'Executive Summary' },
+        ]
+      }
+      generatedSections.value = { 1: reportData.markdown }
+      collapsedSections.value.delete(0)
+      
+      addLog('Report data loaded directly')
     }
   } catch (err) {
     addLog(`Failed to load report: ${err.message}`)
