@@ -50,6 +50,8 @@ def create_app() -> FastAPI:
 
     app.include_router(graph_router, prefix="/api/graph", tags=["graph"])
     app.include_router(simulation_router, prefix="/api/simulations", tags=["simulation"])
+    # Also mount at singular /api/simulation — the frontend uses both forms
+    app.include_router(simulation_router, prefix="/api/simulation", tags=["simulation-alias"])
     app.include_router(report_router, prefix="/api/report", tags=["report"])
 
     @app.get("/health")

@@ -43,7 +43,7 @@ class AgentMemory:
             )
 
     async def _embed(self, text: str) -> list[float]:
-        """Generate embedding via Ollama (wrapped in thread)."""
+        """Generate embedding via Ollama (wrapped in thread). Falls back to random vector."""
         import ollama
         def _call():
             client = ollama.Client(host=Config.OLLAMA_BASE_URL)
@@ -52,8 +52,25 @@ class AgentMemory:
         try:
             return await asyncio.to_thread(_call)
         except Exception as exc:
-            logger.warning("Embedding failed for agent %s: %s", self.agent_id, exc)
-            return []
+            logger.debug("Embedding failed for agent %s: %s — using hash fallback.", self.agent_id, exc)
+            return self._hash_embedding(text)
+
+    @staticmethod
+    def _hash_embedding(text: str, dim: int = 384) -> list[float]:
+        """
+        Deterministic pseudo-embedding from text hash.
+        Not semantically meaningful but lets ChromaDB store/retrieve entries
+        when Ollama is offline — prevents complete memory loss.
+        """
+        import hashlib
+        import struct
+        h = hashlib.sha256(text.encode()).digest()
+        # Tile the 32-byte hash to fill `dim` floats
+        floats = []
+        for i in range(dim):
+            byte_val = h[i % len(h)]
+            floats.append((byte_val / 127.5) - 1.0)  # normalise to [-1, 1]
+        return floats
 
     async def remember(
         self,
@@ -66,8 +83,7 @@ class AgentMemory:
         if memory_type not in MEMORY_TYPES:
             raise ValueError(f"Unknown memory type: {memory_type}")
         embedding = await self._embed(content)
-        if not embedding:
-            return
+        # embedding is always non-empty now (hash fallback guarantees this)
         meta = (metadata or {}).copy()
         meta.update({
             "agent_id": self.agent_id,
@@ -77,13 +93,16 @@ class AgentMemory:
         })
         doc_id = f"{self.agent_id}_{memory_type}_{int(time.time()*1000)}"
         collection = self._collections[memory_type]
-        await asyncio.to_thread(
-            collection.add,
-            documents=[content],
-            embeddings=[embedding],
-            metadatas=[meta],
-            ids=[doc_id],
-        )
+        try:
+            await asyncio.to_thread(
+                collection.add,
+                documents=[content],
+                embeddings=[embedding],
+                metadatas=[meta],
+                ids=[doc_id],
+            )
+        except Exception as exc:
+            logger.warning("Failed to store memory for agent %s: %s", self.agent_id, exc)
 
     async def recall(
         self,

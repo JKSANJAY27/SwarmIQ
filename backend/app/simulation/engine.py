@@ -4,6 +4,7 @@ Asynchronous event loop for ticking the swarm simulation.
 """
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -19,6 +20,37 @@ from ..llm.llm_router import LLMRouter
 from ..memory.memory_manager import MemoryManager
 
 logger = logging.getLogger("swarmiq.simulation.engine")
+
+# ---------------------------------------------------------------------------
+# Fallback agent generation constants (used when Ollama is unavailable)
+# ---------------------------------------------------------------------------
+_FALLBACK_FIRST_NAMES = [
+    "Alice", "Bob", "Charlie", "Diana", "Eve", "Frank", "Grace", "Henry",
+    "Irene", "Jack", "Karen", "Leo", "Maya", "Nathan", "Olivia", "Peter",
+    "Quinn", "Rachel", "Samuel", "Tara", "Uma", "Victor", "Wendy", "Xavier",
+    "Yara", "Zoe", "Alex", "Blake", "Casey", "Drew", "Eli", "Fiona",
+    "George", "Holly", "Ivan", "Julia", "Kevin", "Laura", "Mike", "Nina",
+    "Oscar", "Priya", "Ryan", "Sara", "Tom", "Ursula", "Vera", "Will",
+]
+_FALLBACK_LAST_NAMES = [
+    "Smith", "Chen", "Martinez", "Kim", "Patel", "Williams", "Johnson",
+    "Brown", "Davis", "Wilson", "Thompson", "Moore", "Taylor", "Anderson",
+    "Jackson", "White", "Harris", "Martin", "Garcia", "Rodriguez", "Lewis",
+    "Lee", "Walker", "Hall", "Allen", "Young", "Scott", "Hernandez",
+    "Nguyen", "Singh", "Okafor", "Tanaka", "Ivanova", "Mueller", "Dupont",
+]
+_FALLBACK_OCCUPATIONS: dict[str, list[str]] = {
+    "activist":      ["Community Organizer", "Campaigner", "Advocate", "Volunteer Coordinator"],
+    "journalist":    ["Reporter", "Editor", "Blogger", "Correspondent", "Analyst"],
+    "policy":        ["Government Official", "Policy Analyst", "Bureaucrat", "Adviser"],
+    "business":      ["Business Owner", "Marketing Manager", "Accountant", "Executive"],
+    "academic":      ["Professor", "Researcher", "PhD Student", "Scientist"],
+    "worker":        ["Factory Worker", "Driver", "Warehouse Operative", "Technician"],
+    "professional":  ["Lawyer", "Doctor", "Engineer", "Software Developer", "Nurse"],
+    "student":       ["University Student", "Postgraduate Student", "Intern"],
+    "media":         ["Influencer", "Content Creator", "Podcaster", "Streamer"],
+    "default":       ["Teacher", "Retail Assistant", "Clerk", "Administrator", "Freelancer"],
+}
 
 
 class SimulationEngine:
@@ -47,6 +79,7 @@ class SimulationEngine:
             global_events=[],
             opinion_clusters=[],
             echo_chambers=[],
+            graph_data=world_context.get("graph_data", {"nodes": [], "edges": []})
         )
         self.state.graph = nx.DiGraph(seed=world_context)
 
@@ -67,14 +100,52 @@ class SimulationEngine:
         """Register a callback to run when agents broadcast public statements."""
         self._on_event.append(callback)
 
+    def _generate_fallback_agent(self, idx: int, archetype: str) -> dict:
+        """Generate a procedural agent profile without LLM when Ollama is unavailable."""
+        rng = random.Random(idx)
+        first = _FALLBACK_FIRST_NAMES[idx % len(_FALLBACK_FIRST_NAMES)]
+        last = _FALLBACK_LAST_NAMES[(idx // len(_FALLBACK_FIRST_NAMES)) % len(_FALLBACK_LAST_NAMES)]
+        # Ensure uniqueness by appending number suffix when wrapping
+        suffix = str(idx // (len(_FALLBACK_FIRST_NAMES) * len(_FALLBACK_LAST_NAMES))) if idx >= len(_FALLBACK_FIRST_NAMES) * len(_FALLBACK_LAST_NAMES) else ""
+        name = f"{first} {last}{suffix}"
+
+        arch_lower = archetype.lower()
+        occupations = _FALLBACK_OCCUPATIONS["default"]
+        for key, occs in _FALLBACK_OCCUPATIONS.items():
+            if key in arch_lower:
+                occupations = occs
+                break
+        occupation = rng.choice(occupations)
+        age = rng.randint(22, 65)
+
+        initial_sentiments = self.state.graph.graph.get("initial_sentiments", {})
+        initial_opinions = {
+            t: round(rng.gauss(initial_sentiments.get(t, 0.0), 0.25), 3)
+            for t in self.state.active_topics
+        }
+
+        background = (
+            f"{first} is a {age}-year-old {occupation} with strong personal views "
+            f"on the issues unfolding in their community. "
+            f"They follow current events closely and are not shy about sharing opinions."
+        )
+        return {
+            "name": name,
+            "age": age,
+            "occupation": occupation,
+            "background": background,
+            "initial_opinions": initial_opinions,
+        }
+
     async def initialize_agents(self, count: int) -> None:
-        """Generate N agents using LLM and create their memories."""
+        """Generate N agents using LLM (with procedural fallback) and create their memories."""
         logger.info("Initializing %d agents for sim %s", count, self.sim_id)
-        
-        # We batch these requests
+
+        archetypes_for_idx = [random.choice(self.archetypes) for _ in range(count)]
+
+        # Build LLM prompts for all agents
         prompts = []
-        for i in range(count):
-            arch = random.choice(self.archetypes)
+        for idx, arch in enumerate(archetypes_for_idx):
             sys = f"You are creating a character profile for the {arch} archetype."
             usr = AGENT_GENERATE_PROMPT.format(
                 seed_summary=self.state.graph.graph.get("summary", ""),
@@ -82,40 +153,88 @@ class SimulationEngine:
             )
             prompts.append({"system": sys, "user": usr})
 
-        # Run concurrent Ollama calls (limited by max_concurrent in router)
-        results = await self.llm.ollama.batch_complete(prompts)
-        
+        # Attempt concurrent Ollama calls; fall back gracefully on failure
+        try:
+            results = await self.llm.ollama.batch_complete(prompts)
+        except Exception as exc:
+            logger.warning("Ollama batch_complete raised %s — using procedural fallback for all agents.", exc)
+            results = [""] * count
+
+        llm_ok = 0
+        fallback_ok = 0
+
         for idx, result_json in enumerate(results):
             try:
-                import json
-                data = json.loads(result_json) if isinstance(result_json, str) else result_json
-                
-                # Assign ID
+                data: dict | None = None
+
+                # --- Try parsing LLM output ---
+                if result_json and isinstance(result_json, str):
+                    try:
+                        data = json.loads(result_json)
+                    except json.JSONDecodeError:
+                        pass
+                elif isinstance(result_json, dict) and result_json:
+                    data = result_json
+
+                # --- Procedural fallback when LLM unavailable / returned garbage ---
+                if not data or not isinstance(data, dict) or not data.get("name"):
+                    data = self._generate_fallback_agent(idx, archetypes_for_idx[idx])
+                    fallback_ok += 1
+                else:
+                    llm_ok += 1
+
                 agent_id = f"agent_{self.sim_id}_{idx}"
                 data["id"] = agent_id
-                
-                # Personality
+
                 pers = BigFivePersonality.for_occupation(data.get("occupation", "Worker"))
                 data["personality"] = pers.to_dict()
-                
-                # Topics
+
                 opinions = data.get("initial_opinions", {})
                 for t in self.state.active_topics:
                     if t not in opinions:
-                        opinions[t] = random.gauss(self.state.graph.graph.get("initial_sentiments", {}).get(t, 0.0), 0.2)
+                        opinions[t] = round(
+                            random.gauss(
+                                self.state.graph.graph.get("initial_sentiments", {}).get(t, 0.0), 0.2
+                            ), 3
+                        )
                 data["opinions"] = opinions
-                
+
                 agent = Agent.from_dict(data)
                 self.state.agents[agent_id] = agent
-                
-                # Create memory collection
-                mem = self.memory.get_or_create(agent_id)
-                await mem.remember("semantic", f"I am {agent.name}, a {agent.age} year old {agent.occupation}. {agent.background}")
-                
-            except Exception as e:
-                logger.warning("Failed to parse generating agent %d: %s", idx, e)
 
-        logger.info("Created %d valid agents", len(self.state.agents))
+                mem = self.memory.get_or_create(agent_id)
+                await mem.remember(
+                    "semantic",
+                    f"I am {agent.name}, a {agent.age} year old {agent.occupation}. {agent.background}"
+                )
+
+                # Add agent to the visualization graph
+                self.state.graph_data["nodes"].append({
+                    "id": agent_id, 
+                    "name": agent.name, 
+                    "type": "Agent",
+                    "attrs": {"occupation": agent.occupation, "age": agent.age}
+                })
+                # Add initial opinion edges
+                for topic, op in agent.opinions.items():
+                    if abs(op) > 0.3:
+                        # Add topic node if it doesn't exist
+                        if not any(n["id"] == topic for n in self.state.graph_data["nodes"]):
+                            self.state.graph_data["nodes"].append({
+                                "id": topic, "name": topic, "type": "Topic", "attrs": {}
+                            })
+                        self.state.graph_data["edges"].append({
+                            "source": agent_id, "target": topic, "relation": "OPINION",
+                            "attrs": {"weight": op}
+                        })
+
+            except Exception as e:
+                logger.warning("Unexpected error for agent %d: %s", idx, e)
+
+        logger.info(
+            "Created %d valid agents (%d via LLM, %d procedural fallback)",
+            len(self.state.agents), llm_ok, fallback_ok
+        )
 
     async def inject_event(self, event: dict) -> None:
         """Inject a global event directly into the current tick."""
@@ -175,33 +294,73 @@ class SimulationEngine:
         logger.info("--- Starting Tick %d ---", self.state.tick)
         
         start_t = time.time()
-
-        # Step 1: All agents react concurrently
-        tasks = [self._agent_step(agent) for agent in self.state.agents.values()]
-        reactions = await asyncio.gather(*tasks, return_exceptions=True)
         
         public_statements = []
-        
-        # Process reactions for interactions and broadcasts
-        for agent_id, reaction in zip(self.state.agents.keys(), reactions):
-            if isinstance(reaction, Exception):
-                logger.error("Agent %s step failed: %s", agent_id, reaction)
-                continue
-                
-            if isinstance(reaction, dict):
-                stmt = reaction.get("public_statement")
-                if stmt:
-                    agent = self.state.agents[agent_id]
-                    public_statements.append({
-                        "agent_id": agent.id,
-                        "name": agent.name,
-                        "statement": stmt,
-                        "tick": self.state.tick
-                    })
 
-                    # Broadcast to callbacks immediately 
-                    for cb in self._on_event:
-                        cb(public_statements[-1])
+        async def _step_and_emit(agent: Agent):
+            try:
+                reaction = await self._agent_step(agent)
+                stmt_data = None
+
+                if isinstance(reaction, dict):
+                    stmt = reaction.get("public_statement")
+                    internal = reaction.get("internal_reaction")
+                    
+                    if stmt:
+                        stmt_data = {
+                            "agent_id": agent.id, "name": agent.name,
+                            "statement": stmt, "action_type": "CREATE_POST", "tick": self.state.tick
+                        }
+                        
+                        # Graph updates for the statement
+                        topic = self.state.active_topics[0] if self.state.active_topics else "General public"
+                        self.state.graph_data["edges"].append({
+                            "source": agent.id,
+                            "target": topic,
+                            "relation": "POSTED",
+                            "attrs": {"tick": self.state.tick, "fact": stmt[:30] + "..."}
+                        })
+                        # Keep edge count reasonable
+                        if len(self.state.graph_data["edges"]) > 200:
+                            self.state.graph_data["edges"] = self.state.graph_data["edges"][-150:]
+                            
+                    elif internal:
+                        stmt_data = {
+                            "agent_id": agent.id, "name": agent.name,
+                            "statement": f"(Thought) {internal}", "action_type": "DO_NOTHING", "tick": self.state.tick
+                        }
+                
+                # If neither statement nor dict response exists, emit fallback so UI isn't dead
+                if not stmt_data:
+                    stmt_data = {
+                        "agent_id": agent.id, "name": agent.name,
+                        "statement": "Action skipped locally.", "action_type": "DO_NOTHING", "tick": self.state.tick
+                    }
+
+                # Stream the event immediately to the websocket listeners
+                for cb in self._on_event:
+                    cb(stmt_data)
+                
+                return stmt_data
+            except Exception as e:
+                logger.error("Agent %s step failed: %s", agent.id, e)
+                # Emit explicit failure event to unstuck frontend
+                stmt_data = {
+                    "agent_id": agent.id, "name": agent.name,
+                    "statement": f"Skipped (Error: {str(e)})", "action_type": "DO_NOTHING", "tick": self.state.tick
+                }
+                for cb in self._on_event:
+                    cb(stmt_data)
+                return e
+
+        # Step 1: All agents react concurrently, streaming responses as they finish
+        tasks = [_step_and_emit(agent) for agent in self.state.agents.values()]
+        reactions = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process reactions to consolidate successful public statements
+        for reaction in reactions:
+            if isinstance(reaction, dict) and "agent_id" in reaction and "statement" in reaction:
+                public_statements.append(reaction)
                         
         # Step 2: Distribute selected public statements to other agents' memories
         # To avoid O(N^2) memory explosion, we select the top statements based on agent influence

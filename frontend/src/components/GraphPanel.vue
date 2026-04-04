@@ -19,17 +19,7 @@
       <div v-if="graphData" class="graph-view">
         <svg ref="graphSvg" class="graph-svg"></svg>
         
-        <!-- 构建中/模拟中提示 -->
-        <div v-if="currentPhase === 1 || isSimulating" class="graph-building-hint">
-          <div class="memory-icon-wrapper">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="memory-icon">
-              <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-4.04z" />
-              <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-4.04z" />
-            </svg>
-            <span class="status-pulse"></span>
-            {{ isSimulating ? 'GraphRAG Long/Short-Term Memory Updating in Real-time' : 'Updating in Real-time...' }}
-          </div>
-        </div>
+        <!-- Removed memory updating central overlay as it obstructed graph view -->
         
         <!-- 模拟结束后的提示 -->
         <div v-if="showSimulationFinishedHint" class="graph-building-hint finished-hint">
@@ -346,12 +336,15 @@ const renderGraph = () => {
 
   // Prep data
   const nodeMap = {}
-  nodesData.forEach(n => nodeMap[n.uuid] = n)
+  nodesData.forEach(n => {
+    n.uuid = n.uuid || n.id
+    nodeMap[n.uuid] = n
+  })
   
   const nodes = nodesData.map(n => ({
     id: n.uuid,
-    name: n.name || 'Unnamed',
-    type: n.labels?.find(l => l !== 'Entity') || 'Entity',
+    name: n.name || n.id || n.attrs?.name || 'Unnamed',
+    type: n.type || n.attrs?.type || n.labels?.find(l => l !== 'Entity') || 'Entity',
     rawData: n
   }))
   
@@ -360,7 +353,17 @@ const renderGraph = () => {
   // 处理边数据，计算同一对节点间的边数量和索引
   const edgePairCount = {}
   const selfLoopEdges = {} // 按节点分组的自环边
-  const tempEdges = edgesData
+  
+  // 规范化边数据
+  const normalizedEdges = edgesData.map(e => ({
+    ...e,
+    source_node_uuid: e.source_node_uuid || e.source,
+    target_node_uuid: e.target_node_uuid || e.target,
+    name: e.name || e.relation || e.attrs?.relation || 'RELATED',
+    fact_type: e.fact_type || e.relation || e.attrs?.relation || 'Unknown'
+  }))
+  
+  const tempEdges = normalizedEdges
     .filter(e => nodeIds.has(e.source_node_uuid) && nodeIds.has(e.target_node_uuid))
   
   // 统计每对节点之间的边数量，收集自环边

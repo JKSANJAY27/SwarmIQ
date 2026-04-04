@@ -73,6 +73,11 @@ async def build_graph(
     builder = WorldBuilder(llm=llm)
     world_context = await builder.build_context(G, goal)
 
+    world_context["graph_data"] = {
+        "nodes": [{"id": str(n), "name": str(n), "type": d.get("type", "Entity"), "attrs": dict(d)} for n, d in G.nodes(data=True)],
+        "edges": [{"source": str(u), "target": str(v), "relation": d.get("relation", "RELATED"), "attrs": dict(d)} for u, v, d in G.edges(data=True)]
+    }
+
     # Save initial Seed State
     import json
     seed_file = os.path.join(Config.EXPORTS_DIR, f"{sim_id}_seed.json")

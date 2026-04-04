@@ -106,9 +106,12 @@
     <!-- Main Content: Dual Timeline -->
     <div class="main-content-area" ref="scrollContainer">
       <!-- Timeline Header -->
-      <div class="timeline-header" v-if="allActions.length > 0">
+      <div class="timeline-header" v-if="allActions.length > 0 || phase === 1">
         <div class="timeline-stats">
           <span class="total-count">TOTAL EVENTS: <span class="mono">{{ allActions.length }}</span></span>
+          <span v-if="phase === 1" class="processing-badge">
+            <span class="loading-spinner-small spinner-alt"></span> Processing Actions...
+          </span>
           <span class="platform-breakdown">
             <span class="breakdown-item twitter">
               <svg class="mini-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
@@ -240,11 +243,14 @@
                   </div>
                 </template>
 
-                <!-- DO_NOTHING: 无操作（静默） -->
+                <!-- DO_NOTHING: 无操作（静默）/ 思考 -->
                 <template v-if="action.action_type === 'DO_NOTHING'">
                   <div class="idle-info">
                     <svg class="icon-small" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-                    <span class="idle-label">Action Skipped</span>
+                    <span class="idle-label">Action Skipped / Internal Thought</span>
+                  </div>
+                  <div v-if="action.action_args?.content" class="content-text" style="color: #888; font-style: italic;">
+                    {{ action.action_args.content }}
                   </div>
                 </template>
 
@@ -264,7 +270,10 @@
 
         <div v-if="allActions.length === 0" class="waiting-state">
           <div class="pulse-ring"></div>
-          <span>Waiting for agent actions...</span>
+          <div class="waiting-text">
+            <span>Waiting for agents...</span>
+            <span class="waiting-subtext" style="display:block; font-size:12px; color: #888; margin-top: 8px;">(LLMs are actively generating responses. This may take longer depending on hardware)</span>
+          </div>
         </div>
       </div>
     </div>
@@ -299,6 +308,10 @@ import { generateReport } from '../api/report'
 const props = defineProps({
   simulationId: String,
   maxRounds: Number, // 从Step2传入的最大轮数
+  numAgents: {
+    type: Number,
+    default: 5
+  },
   minutesPerRound: {
     type: Number,
     default: 30 // 默认每轮30分钟
@@ -394,7 +407,8 @@ const doStartSimulation = async () => {
   try {
     const params = {
       sim_id: props.simulationId,
-      num_ticks: props.maxRounds || 100
+      num_ticks: props.maxRounds || 100,
+      num_agents: props.numAgents || 5
     }
     
     if (props.maxRounds) {
@@ -403,23 +417,24 @@ const doStartSimulation = async () => {
     
     const res = await startSimulation(params)
     
-    if (res.success && res.data) {
-      if (res.data.force_restarted) {
+    // Backend returns {success, sim_id, message} — no .data wrapper
+    if (res && res.success) {
+      if (res.force_restarted) {
         addLog('✓ Cleared old logs, restarting simulation')
       }
       addLog('✓ Simulation sequence triggered asynchronously.')
-      addLog('⏳ NOTE: Native Swarm Engine is currently spinning up LLM contexts and generating agent archetypes via batch API calls in the background.')
-      addLog('⏳ This will take anywhere from 30 seconds to a few minutes depending on your LLM API limits before you see tick activity.')
+      addLog('⏳ NOTE: Native Swarm Engine is currently spinning up LLM contexts and generating agent archetypes in the background.')
+      addLog('⏳ If Ollama is unavailable, agents will be generated via procedural fallback — simulation will still run.')
       addLog('✓ Engine is active and waiting for first tick.')
       
       phase.value = 1
-      runStatus.value = res.data
+      runStatus.value = res
       
       startStatusPolling() // Starts websocket
       startDetailPolling()
     } else {
-      startError.value = res.error || 'Failed to start'
-      addLog(`✗ Failed to start: ${res.error || 'Unknown error'}`)
+      startError.value = (res && res.error) || res?.message || 'Failed to start'
+      addLog(`✗ Failed to start: ${startError.value}`)
       emit('update-status', 'error')
     }
   } catch (err) {
@@ -461,9 +476,9 @@ let socket = null
 
 const startStatusPolling = () => {
   // Use websocket instead of polling
+  const backendPort = import.meta.env.VITE_BACKEND_PORT || '5001'
   let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  // Use exactly the backend host or local proxy
-  let wsUrl = `${wsProtocol}//${window.location.hostname}:8000/api/simulations/${props.simulationId}/ws`;
+  let wsUrl = `${wsProtocol}//${window.location.hostname}:${backendPort}/api/simulations/${props.simulationId}/ws`;
   
   socket = new WebSocket(wsUrl);
   
@@ -502,9 +517,9 @@ const startStatusPolling = () => {
         if (!actionIds.value.has(actionId)) {
           actionIds.value.add(actionId);
           allActions.value.push({
-            action_type: 'CREATE_POST',
+            action_type: actionPayload.action_type || 'CREATE_POST',
             agent_name: actionPayload.name,
-            platform: 'twitter',
+            platform: actionPayload.platform || 'twitter',
             action_args: { content: actionPayload.statement },
             timestamp: new Date().toISOString(),
             _uniqueId: actionId
@@ -900,6 +915,26 @@ onUnmounted(() => {
 .total-count {
   font-weight: 600;
   color: #333;
+}
+
+.processing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #E8F5E9;
+  color: #2E7D32;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  margin-left: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.spinner-alt {
+  border-color: rgba(46, 125, 50, 0.2);
+  border-top-color: #2E7D32;
 }
 
 .platform-breakdown {

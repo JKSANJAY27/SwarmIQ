@@ -5,17 +5,22 @@ import service, { requestWithRetry } from './index'
  * @param {FormData} formData - 包含files, goal 等
  * @returns {Promise}
  */
-export function buildGraphFast(formData) {
-  return requestWithRetry(() => 
-    service({
-      url: '/api/graph/build',
-      method: 'post',
-      data: formData,
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
-    })
-  )
+export async function buildGraphFast(formData) {
+  // Use pure browser native fetch to absolutely ensure FormData integrity and boundary headers
+  // bypassing any global Axios headers that might be silently breaking the multipart upload.
+  const API_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5001'
+  
+  const response = await fetch(`${API_URL}/api/graph/build`, {
+    method: 'POST',
+    body: formData
+  })
+  
+  if (!response.ok) {
+    const errText = await response.text()
+    throw new Error(`Server returned ${response.status}: ${errText}`)
+  }
+  
+  return await response.json()
 }
 
 /**
@@ -24,13 +29,12 @@ export function buildGraphFast(formData) {
  * @returns {Promise}
  */
 export function buildGraph(data) {
-  return requestWithRetry(() =>
-    service({
-      url: '/api/graph/build',
-      method: 'post',
-      data
-    })
-  )
+  return service({
+    url: '/api/graph/build',
+    method: 'post',
+    data,
+    timeout: 0 // Disable timeout completely
+  })
 }
 
 /**
@@ -41,25 +45,10 @@ export function getTaskStatus(taskId) {
 }
 
 /**
- * 获取图谱数据 (Mocked for SwarmIQ)
+ * 获取图谱数据
  */
 export function getGraphData(graphId) {
-  return Promise.resolve({
-    success: true,
-    data: {
-      nodes: [
-        { id: '1', label: 'Simulation Environment', group: 1, size: 25 },
-        { id: '2', label: 'Agent Personas', group: 2, size: 20 },
-        { id: '3', label: 'Events', group: 3, size: 15 },
-        { id: '4', label: 'Documents', group: 4, size: 15 }
-      ],
-      edges: [
-        { from: '1', to: '2', label: 'contains' },
-        { from: '1', to: '3', label: 'manages' },
-        { from: '4', to: '1', label: 'context' }
-      ]
-    }
-  })
+  return service.get(`/api/simulations/${graphId}/graph`)
 }
 
 /**

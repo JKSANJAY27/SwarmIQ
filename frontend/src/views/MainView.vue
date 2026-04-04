@@ -201,9 +201,13 @@ const handleNewProject = async () => {
     addLog('Starting single-shot graph build: Uploading files...')
     
     const formData = new FormData()
-    pending.files.forEach(f => formData.append('files', f))
+    pending.files.forEach(f => {
+      formData.append('files', f)
+      addLog(`Attached file: ${f.name} (${Math.round(f.size / 1024)} KB)`)
+    })
     formData.append('goal', pending.simulationRequirement)
     
+    addLog(`Sending to backend, awaiting LLM pipeline...`)
     const res = await buildGraphFast(formData)
     if (res.success) {
       clearPendingUpload()

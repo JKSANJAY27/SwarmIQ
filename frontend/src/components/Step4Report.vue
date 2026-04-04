@@ -2125,38 +2125,42 @@ const extractFinalContent = (response) => {
 }
 
 const fetchConsoleLog = async () => {
+    // Deprecated log polling
+}
+
+import { getReport } from '../api/report'
+
+const startPolling = async () => {
   if (!props.reportId) return
   
   try {
-    const res = await getConsoleLog(props.reportId, consoleLogLine.value)
-    
-    if (res.success && res.data) {
-      const newLogs = res.data.logs || []
-      
-      if (newLogs.length > 0) {
-        consoleLogs.value.push(...newLogs)
-        consoleLogLine.value = res.data.from_line + newLogs.length
-        
-        nextTick(() => {
-          if (logContent.value) {
-            logContent.value.scrollTop = logContent.value.scrollHeight
-          }
-        })
+    const res = await getReport(props.reportId)
+    if (res.success && res.markdown) {
+      reportOutline.value = {
+        title: 'Simulation Analytics Report',
+        summary: 'Final Synthesis of Simulation Run',
+        sections: [
+          { title: 'Executive Summary' },
+        ]
       }
+      isComplete.value = true
+      generatedSections.value = { 1: res.markdown }
+      expandedContent.value = new Set([0])
+      agentLogs.value = [{ 
+          action: 'report_complete', 
+          timestamp: new Date().toISOString() 
+      }]
+      
+      emit('update-status', 'completed')
     }
   } catch (err) {
-    console.warn('Failed to fetch console log:', err)
+    if (err.response && err.response.status === 404) {
+      console.log("Report not ready yet. Retrying...")
+      setTimeout(startPolling, 5000)
+    } else {
+      console.error('Failed to fetch report:', err)
+    }
   }
-}
-
-const startPolling = () => {
-  if (agentLogTimer || consoleLogTimer) return
-  
-  fetchAgentLog()
-  fetchConsoleLog()
-  
-  agentLogTimer = setInterval(fetchAgentLog, 2000)
-  consoleLogTimer = setInterval(fetchConsoleLog, 1500)
 }
 
 const stopPolling = () => {

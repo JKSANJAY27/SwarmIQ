@@ -25,20 +25,22 @@ class GeminiClient:
     """
 
     def __init__(self, api_key: str | None = None, model: str | None = None):
-        import google.generativeai as genai
+        from google import genai
 
         self._api_key = api_key or Config.GEMINI_API_KEY
         self._model_name = model or Config.GEMINI_MODEL
         if not self._api_key:
             raise ValueError("GEMINI_API_KEY not configured")
-        genai.configure(api_key=self._api_key)
-        self._model = genai.GenerativeModel(self._model_name)
+        self._client = genai.Client(api_key=self._api_key)
         logger.info("GeminiClient initialised with model %s", self._model_name)
 
     async def _generate(self, prompt: str) -> str:
         """Run a Gemini generation call in a thread (SDK is synchronous)."""
         def _call() -> str:
-            response = self._model.generate_content(prompt)
+            response = self._client.models.generate_content(
+                model=self._model_name,
+                contents=prompt
+            )
             return response.text
 
         try:
@@ -144,3 +146,16 @@ Provide a comparative analysis covering:
 
 Use markdown formatting."""
         return await self._generate(prompt)
+
+    async def generic_chat(
+        self, system: str = "", message: str = "", history: list | None = None
+    ) -> str:
+        """Generic Q&A chat — used for interactive report analysis."""
+        history = history or []
+        history_text = "\n".join(
+            f"{turn.get('role','user').upper()}: {turn.get('content','')}"
+            for turn in history[-6:]  # last 6 turns for context
+        )
+        prompt = f"{system}\n\n{history_text}\n\nUSER: {message}\n\nASSISTANT:"
+        return await self._generate(prompt)
+

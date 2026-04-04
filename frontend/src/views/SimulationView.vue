@@ -158,12 +158,16 @@ const handleNextStep = (params = {}) => {
   // 构建路由参数
   const routeParams = {
     name: 'SimulationRun',
-    params: { simulationId: currentSimulationId.value }
+    params: { simulationId: currentSimulationId.value },
+    query: {}
   }
   
-  // 如果有自定义轮数，通过 query 参数传递
+  // 传递相关配置参数
   if (params.maxRounds) {
-    routeParams.query = { maxRounds: params.maxRounds }
+    routeParams.query.maxRounds = params.maxRounds
+  }
+  if (params.numAgents) {
+    routeParams.query.numAgents = params.numAgents
   }
   
   // 跳转到 Step 3 页面

@@ -27,6 +27,7 @@ GEMINI_TASKS = {
     "report_synthesize",
     "event_synthesize",
     "branch_compare",
+    "generic_chat",
 }
 
 
@@ -46,7 +47,6 @@ class LLMRouter:
         if task in GEMINI_TASKS:
             if self.gemini:
                 try:
-                    method_name = task  # e.g. "seed_analyze" -> gemini.analyze_seed (mapped below)
                     return await self._dispatch_gemini(task, **kwargs)
                 except Exception as exc:
                     logger.warning(
@@ -61,7 +61,9 @@ class LLMRouter:
         if task in OLLAMA_TASKS:
             return await self._dispatch_ollama(task, **kwargs)
 
-        raise ValueError(f"Unknown task: {task}")
+        # Unknown task — log and return empty instead of crashing
+        logger.warning("Unknown LLM task '%s' — returning empty response.", task)
+        return ""
 
     async def _dispatch_gemini(self, task: str, **kwargs: Any) -> Any:
         mapping = {
@@ -69,6 +71,7 @@ class LLMRouter:
             "report_synthesize": self.gemini.synthesize_report,
             "event_synthesize": self.gemini.synthesize_event,
             "branch_compare": self.gemini.compare_branches,
+            "generic_chat": self.gemini.generic_chat if hasattr(self.gemini, "generic_chat") else None,
         }
         fn = mapping.get(task)
         if fn is None:
@@ -109,5 +112,11 @@ class LLMRouter:
             user = f"Compare these simulation branches and summarise differences:\n{str(summaries)[:3000]}"
             return await self.ollama.complete(system=system, user=user)
 
-        logger.error("No fallback handler for task: %s", task)
-        return {}
+        if task == "generic_chat":
+            system = kwargs.get("system", "You are a helpful assistant.")
+            message = kwargs.get("message", "")
+            return await self.ollama.complete(system=system, user=message)
+
+        logger.warning("No fallback handler for task: %s — returning empty.", task)
+        return ""
+
