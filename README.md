@@ -66,3 +66,9 @@ Once the report generation is complete, the interactive chatbot (`/chat` endpoin
 
 Instead of re-querying the massive, token-heavy graph directly every time the user asks a question, the chatbot functions as a **Focused Context RAG**.
 It loads the final calculated Markdown Report and acts as an "Expert Analyst." When a user asks a question about the simulation results, it uses the report text as its direct context window. This ensures concise, factual responses backed exclusively by the socio-dynamic data printed in the report.
+
+<img width="1366" height="768" alt="image" src="https://github.com/user-attachments/assets/c64d6d8a-04e9-4302-b11e-f4bfea5c81f6" />
+<img width="1366" height="768" alt="image" src="https://github.com/user-attachments/assets/1ff4197a-9113-40ee-b8bf-b6e28be96e29" />
+<img width="1366" height="768" alt="image" src="https://github.com/user-attachments/assets/89c669c8-4e64-42df-9ca7-97ecdb29172d" />
+
+
